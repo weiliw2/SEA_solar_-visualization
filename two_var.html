@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <title>Mapbox GeoJSON Visualization with Intense Heatmap</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://api.mapbox.com/mapbox-gl-js/v2.8.1/mapbox-gl.js"></script>
+    <link href="https://api.mapbox.com/mapbox-gl-js/v2.8.1/mapbox-gl.css" rel="stylesheet" />
+    <style>
+        body { margin: 0; padding: 0; }
+        #map { position: absolute; top: 0; bottom: 0; width: 100%; }
+        .controls {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: white;
+            padding: 10px;
+            font-size: 14px;
+            font-family: Arial, sans-serif;
+            box-shadow: 0 0 15px rgba(0, 0, 0, 0.2);
+            z-index: 1;
+        }
+        .legend {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            background: white;
+            padding: 10px;
+            font-size: 12px;
+            font-family: Arial, sans-serif;
+            box-shadow: 0 0 15px rgba(0, 0, 0, 0.2);
+            z-index: 1;
+        }
+    </style>
+</head>
+<body>
+<div id="map"></div>
+<div class="controls">
+    <label>
+        <input type="radio" name="variable" value="yearly_sunlight_kwh_total" checked>
+        Yearly Sunlight (kWh)
+    </label>
+    <label>
+        <input type="radio" name="variable" value="carbon_offset_metric_tons">
+        Carbon Offset (Metric Tons)
+    </label>
+    <label>
+        <input type="radio" name="variable" value="Population below 200% poverty">
+        Income Below 200% Poverty
+    </label>
+</div>
+<div class="legend" id="legend"></div>
+<script>
+    // Add your Mapbox access token here
+    mapboxgl.accessToken = 'pk.eyJ1Ijoid2VpbGl3MiIsImEiOiJjbHd0bW1lZmEwNWF2MmlxNDV3YXB4dTloIn0.mbyaMDr0Jttlc_eSdlQTbg';
+
+    // Initialize the map
+    var map = new mapboxgl.Map({
+        container: 'map',
+        style: 'mapbox://styles/mapbox/streets-v11',
+        center: [-122.3321, 47.6062], // Seattle coordinates
+        zoom: 10
+    });
+
+    // Add zoom and rotation controls to the map
+    map.addControl(new mapboxgl.NavigationControl());
+
+    // Variable to keep track of the current overlay layer
+    var currentLayer = null;
+
+    // Load GeoJSON data
+    map.on('load', function () {
+        map.addSource('solarData', {
+            'type': 'geojson',
+            'data': 'seattle_solar_data.geojson'
+        });
+
+        // Add base heatmap layer for number_of_panels_total
+        map.addLayer({
+            'id': 'baseHeatmapLayer',
+            'type': 'heatmap',
+            'source': 'solarData',
+            'maxzoom': 15,
+            'paint': {
+                'heatmap-weight': [
+                    'interpolate',
+                    ['linear'],
+                    ['to-number', ['get', 'number_of_panels_total']],
+                    0, 0,
+                    1000, 1
+                ],
+                'heatmap-intensity': [
+                    'interpolate',
+                    ['linear'],
+                    ['zoom'],
+                    0, 1,
+                    15, 3
+                ],
+                'heatmap-color': [
+                    'interpolate',
+                    ['linear'],
+                    ['heatmap-density'],
+                    0, 'rgba(33,102,172,0)',
+                    0.2, 'rgba(0,255,0,0.5)',
+                    0.4, 'rgba(255,255,0,0.5)',
+                    0.6, 'rgba(255,165,0,0.5)',
+                    0.8, 'rgba(255,69,0,0.5)',
+                    1, 'rgba(255,0,0,0.5)'
+                ],
+                'heatmap-radius': [
+                    'interpolate',
+                    ['linear'],
+                    ['zoom'],
+                    0, 2,
+                    9, 40
+                ],
+                'heatmap-opacity': 0.8
+            }
+        });
+
+        // Add initial overlay layer for yearly_sunlight_kwh_total
+        addOverlayLayer('yearly_sunlight_kwh_total');
+
+        // Add event listeners to radio buttons
+        document.querySelectorAll('input[name="variable"]').forEach(function (input) {
+            input.addEventListener('change', function () {
+                var selectedVariable = document.querySelector('input[name="variable"]:checked').value;
+                updateOverlayLayer(selectedVariable);
+            });
+        });
+    });
+
+    function addOverlayLayer(variable) {
+        if (currentLayer) {
+            map.removeLayer(currentLayer);
+            map.off('click', onClickPopup);
+            map.off('mouseenter', onMouseEnter);
+            map.off('mouseleave', onMouseLeave);
+        }
+
+        currentLayer = 'overlayLayer-' + variable;
+
+        map.addLayer({
+            'id': currentLayer,
+            'type': 'circle',
+            'source': 'solarData',
+            'minzoom': 0,
+            'paint': {
+                'circle-radius': [
+                    'interpolate',
+                    ['linear'],
+                    ['to-number', ['get', variable]],
+                    0, 5,
+                    1000, 15,
+                    5000, 30
+                ],
+                'circle-color': [
+                    'interpolate',
+                    ['linear'],
+                    ['to-number', ['get', variable]],
+                    0, '#2DC4B2',
+                    1000, '#3BB3C3',
+                    2000, '#669EC4',
+                    3000, '#8B88B6',
+                    4000, '#A2719B',
+                    5000, '#AA5E79'
+                ],
+                'circle-opacity': 0.8
+            }
+        });
+
+        // Event handlers
+        map.on('click', currentLayer, onClickPopup);
+        map.on('mouseenter', currentLayer, onMouseEnter);
+        map.on('mouseleave', currentLayer, onMouseLeave);
+    }
+
+    function onClickPopup(e) {
+        var variable = document.querySelector('input[name="variable"]:checked').value;
+        var properties = e.features[0].properties;
+        new mapboxgl.Popup()
+            .setLngLat(e.lngLat)
+            .setHTML('<h3>' + properties.region_name + '</h3><p>' + variable + ': ' + properties[variable] + '</p>')
+            .addTo(map);
+    }
+
+    function onMouseEnter() {
+        map.getCanvas().style.cursor = 'pointer';
+    }
+
+    function onMouseLeave() {
+        map.getCanvas().style.cursor = '';
+    }
+
+    function updateOverlayLayer(variable) {
+        addOverlayLayer(variable);
+    }
+
+    // Add legend
+    var legend = document.getElementById('legend');
+    legend.innerHTML = `
+        <strong>Legend</strong>
+        <br><span style="background-color:rgba(33,102,172,1);width:20px;height:20px;display:inline-block;"></span> Low Panels
+        <br><span style="background-color:rgba(178,24,43,1);width:20px;height:20px;display:inline-block;"></span> High Panels
+    `;
+</script>
+</div>
+</body>
+</html>
+
